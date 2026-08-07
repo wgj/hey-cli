@@ -79,6 +79,8 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 	if resp == nil {
 		resp = &generated.CalendarRecordingsResponse{}
 	}
+	filterCalendarEvents(resp, startsOn, endsOn, time.Local)
+
 	var total, shown int
 	for _, recordings := range *resp {
 		total += len(recordings)
@@ -118,4 +120,54 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 		output.WithSummary(fmt.Sprintf("Recordings for calendar %d (%s to %s)", calendarID, startsOn, endsOn)),
 		output.WithNotice(notice),
 	)
+}
+
+func filterCalendarEvents(resp *generated.CalendarRecordingsResponse, startsOn, endsOn string, location *time.Location) {
+	rangeStart, err := time.ParseInLocation("2006-01-02", startsOn, location)
+	if err != nil {
+		return
+	}
+	rangeEnd, err := time.ParseInLocation("2006-01-02", endsOn, location)
+	if err != nil {
+		return
+	}
+
+	events, ok := (*resp)["Calendar::Event"]
+	if !ok {
+		return
+	}
+	filtered := make([]generated.Recording, 0, len(events))
+	for _, event := range events {
+		if eventOverlapsDateRange(event, rangeStart, rangeEnd) {
+			filtered = append(filtered, event)
+		}
+	}
+	(*resp)["Calendar::Event"] = filtered
+}
+
+func eventOverlapsDateRange(event generated.Recording, rangeStart, rangeEnd time.Time) bool {
+	if event.StartsAt.IsZero() || !rangeEnd.After(rangeStart) {
+		return false
+	}
+
+	startsAt, endsAt := event.StartsAt, event.EndsAt
+	if event.AllDay {
+		// HEY represents the final visible all-day date in ends_at.
+		if endsAt.IsZero() {
+			endsAt = startsAt
+		}
+		startsAt = dateInLocation(startsAt, rangeStart.Location())
+		endsAt = dateInLocation(endsAt, rangeStart.Location())
+		endsAt = endsAt.AddDate(0, 0, 1)
+	}
+	if !endsAt.After(startsAt) {
+		endsAt = startsAt.Add(time.Nanosecond)
+	}
+
+	return startsAt.Before(rangeEnd) && endsAt.After(rangeStart)
+}
+
+func dateInLocation(value time.Time, location *time.Location) time.Time {
+	year, month, day := value.Date()
+	return time.Date(year, month, day, 0, 0, 0, 0, location)
 }
