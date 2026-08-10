@@ -2,8 +2,8 @@
 name: hey
 description: |
   Interact with HEY email via the HEY CLI. Read and send emails, manage boxes,
-  calendars, todos, habits, time tracking, and journal entries. Use for ANY
-  HEY-related question or action.
+  calendars and daily schedules, todos, habits, time tracking, and journal
+  entries. Use for ANY HEY-related question or action.
 triggers:
   # Direct invocations
   - hey
@@ -18,6 +18,7 @@ triggers:
   # Calendar actions
   - hey calendars
   - hey recordings
+  - hey day-view
   # Todos
   - hey todo
   # Seen/unseen
@@ -43,6 +44,10 @@ triggers:
   - compose email
   - list mailboxes
   - check calendar
+  - check my schedule
+  - what's my schedule today
+  - what is my schedule today
+  - what's on my calendar today
   - add todo
   - complete todo
   - track time
@@ -59,6 +64,7 @@ triggers:
   - my imbox
   - my todos
   - my calendar
+  - my schedule
   - my journal
   # URLs
   - hey.com
@@ -77,6 +83,7 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 1. **Always use `--json`** for structured, predictable output
 2. **Authentication required** for all data commands — run `hey auth login` first
 3. **HTML output** is available via `--html` for commands that return HTML content
+4. **Use `hey day-view --json` for daily schedule questions** — `hey recordings` is not a complete Day View
 
 ## Quick Reference
 
@@ -90,7 +97,8 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 | Compose with CC/BCC | `hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello"` |
 | List drafts | `hey drafts --json` |
 | List calendars | `hey calendars --json` |
-| List calendar events | `hey recordings 123 --json` |
+| List source recordings | `hey recordings 123 --json` |
+| Show today's schedule | `hey day-view --json` |
 | List todos | `hey todo list --json` |
 | Add todo | `hey todo add "Buy milk"` |
 | Complete todo | `hey todo complete 123` |
@@ -136,6 +144,17 @@ Want to send email?
 │   ├── With CC? → add --cc <email>
 │   └── With BCC? → add --bcc <email>
 └── Check drafts? → hey drafts --json
+```
+
+### Reading the Calendar
+
+```
+Want to read the calendar?
+├── Today's schedule? → hey day-view --json
+├── Another day's schedule? → hey day-view YYYY-MM-DD --json
+├── Only selected calendars? → add --calendar <id> for each calendar
+├── List available calendars? → hey calendars --json
+└── Inspect source recordings for one calendar? → hey recordings <calendar-id> --json
 ```
 
 ### Managing Todos
@@ -205,9 +224,17 @@ hey drafts --json                             # List drafts
 ```bash
 hey calendars --json                          # List calendars (returns array of {id, name, kind})
 hey recordings 123 --json                     # List events in calendar
+hey day-view --json                           # Show today's schedule from all calendars
+hey day-view 2026-01-15 --calendar 123 --calendar 456 --json  # Use only these calendars
 ```
 
 **Response format:** `hey recordings` returns recordings grouped by type (e.g. `{"Calendar::Event": [...], "Calendar::Habit": [...], "Calendar::Todo": [...]}`). Each recording has: `id`, `title`, `starts_at`, `ends_at`, `all_day`, `recurring`, `starts_at_time_zone`. Access by type key in jq, e.g. `.["Calendar::Event"]`.
+
+Use `hey day-view [YYYY-MM-DD] --json` to answer daily schedule questions. If you omit the date, it uses today in the HEY account time zone. If you omit `--calendar`, it queries all calendars. Repeat `--calendar <id>` to use only selected calendars.
+
+`day-view` merges source recordings with realized and unrealized occurrences. It filters all sources to the requested day. It removes duplicates by event ID or occurrence ID, never by title and time. It returns only timed, all-day, overnight, and multi-day `Calendar::Event` records. It excludes HEY's Nighttime display block and all non-event records. JSON keeps `starts_at` and `ends_at` in UTC. The response metadata includes `date` and `time_zone`.
+
+The command fails if any required recordings or occurrences request fails for a selected calendar. Treat an error as an unknown schedule. Do not report a partial result as complete. Use `recordings` only when you need the source records for one calendar.
 
 ### Todos
 

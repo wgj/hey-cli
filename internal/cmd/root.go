@@ -124,6 +124,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newComposeCommand().cmd)
 	root.AddCommand(newDraftsCommand().cmd)
 	root.AddCommand(newCalendarsCommand().cmd)
+	root.AddCommand(newDayViewCommand().cmd)
 	root.AddCommand(newRecordingsCommand().cmd)
 	root.AddCommand(newTodoCommand().cmd)
 	root.AddCommand(newHabitCommand().cmd)

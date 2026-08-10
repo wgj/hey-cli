@@ -39,6 +39,8 @@ hey compose --to
 hey config
 hey config set
 hey config show
+hey day-view
+hey day-view --calendar
 hey doctor
 hey drafts
 hey drafts --all

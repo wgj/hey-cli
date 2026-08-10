@@ -3,6 +3,7 @@ package smoke_test
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestCalendarsList(t *testing.T) {
@@ -133,4 +134,59 @@ func TestRecordingsNoArgument(t *testing.T) {
 
 func TestRecordingsInvalidCalendarID(t *testing.T) {
 	heyFail(t, "recordings", "999999999", "--json")
+}
+
+func TestDayView(t *testing.T) {
+	type Calendar struct {
+		ID int `json:"id"`
+	}
+	type Event struct {
+		Type     string   `json:"type"`
+		StartsAt string   `json:"starts_at"`
+		EndsAt   string   `json:"ends_at"`
+		Calendar Calendar `json:"calendar"`
+	}
+
+	const date = "2026-01-15"
+	resp := heyJSON(t, "day-view", date)
+	events := dataAs[[]Event](t, resp)
+	if got := resp.Meta["date"]; got != date {
+		t.Errorf("day-view date = %#v, want %q", got, date)
+	}
+	if got, _ := resp.Meta["time_zone"].(string); got == "" {
+		t.Error("day-view time_zone metadata is empty")
+	}
+	for _, event := range events {
+		if event.Type != "Calendar::Event" {
+			t.Errorf("day-view returned recording type %q", event.Type)
+		}
+		for field, value := range map[string]string{"starts_at": event.StartsAt, "ends_at": event.EndsAt} {
+			if value == "" {
+				continue
+			}
+			parsed, err := time.Parse(time.RFC3339Nano, value)
+			if err != nil {
+				t.Errorf("day-view %s = %q, want RFC 3339 time", field, value)
+				continue
+			}
+			_, offset := parsed.Zone()
+			if offset != 0 {
+				t.Errorf("day-view %s = %q, want UTC", field, value)
+			}
+		}
+	}
+
+	calendarResp := heyJSON(t, "calendars")
+	calendars := dataAs[[]Calendar](t, calendarResp)
+	if len(calendars) == 0 {
+		t.Fatal("no calendars available")
+	}
+
+	calendarID := calendars[0].ID
+	scopedResp := heyJSON(t, "day-view", date, "--calendar", intStr(calendarID))
+	for _, event := range dataAs[[]Event](t, scopedResp) {
+		if event.Calendar.ID != calendarID {
+			t.Errorf("day-view event calendar = %d, want %d", event.Calendar.ID, calendarID)
+		}
+	}
 }
