@@ -15,6 +15,8 @@ require (
 	golang.org/x/term v0.45.0
 )
 
+replace github.com/basecamp/hey-sdk/go => github.com/wgj/hey-sdk/go v0.3.1-0.20260811164819-31edbe22aa9e
+
 require (
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect

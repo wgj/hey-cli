@@ -32,6 +32,7 @@ hey completion
 hey compose
 hey compose --bcc
 hey compose --cc
+hey compose --draft
 hey compose --message
 hey compose --subject
 hey compose --thread-id
@@ -40,6 +41,13 @@ hey config
 hey config set
 hey config show
 hey doctor
+hey draft
+hey draft create
+hey draft create --bcc
+hey draft create --cc
+hey draft create --message
+hey draft create --subject
+hey draft create --to
 hey drafts
 hey drafts --all
 hey drafts --limit

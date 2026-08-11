@@ -17,6 +17,8 @@ The legacy `internal/client/` is used only for HTML-scraping gap operations mark
 | `/calendars/{id}/recordings.json` | GET | SDK `Calendars().GetRecordings` | `hey recordings <calendar-id>`, `hey todo list`, `hey timetrack list`, `hey journal list` | covered |
 | `/topics/{id}/entries` | GET (HTML) | Legacy `GetTopicEntries` | `hey threads <id>` | gap: SDK Entry lacks body |
 | `/entries/drafts.json` | GET | SDK `Entries().ListDrafts` | `hey drafts` | covered |
+| `/messages/new` | GET (HTML) | SDK `Messages().CreateDraft` | `hey draft create`, `hey compose --draft` | covered |
+| `/messages` | POST (form) | SDK `Messages().CreateDraft` | `hey draft create`, `hey compose --draft` | covered |
 | `/topics/messages` | POST | SDK `Messages().Create` | `hey compose` | covered |
 | `/topics/{id}/messages` | POST | SDK `Messages().CreateTopicMessage` | `hey compose --topic` | covered |
 | `/entries/{id}/replies` | POST | SDK `Entries().CreateReply` | `hey reply <topic-id>` | covered |

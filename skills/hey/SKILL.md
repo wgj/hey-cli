@@ -1,9 +1,9 @@
 ---
 name: hey
 description: |
-  Interact with HEY email via the HEY CLI. Read and send emails, manage boxes,
-  calendars, todos, habits, time tracking, and journal entries. Use for ANY
-  HEY-related question or action.
+  Interact with HEY email via the HEY CLI. Read and send emails, save drafts,
+  manage boxes, calendars, todos, habits, time tracking, and journal entries.
+  Use for ANY HEY-related question or action.
 triggers:
   # Direct invocations
   - hey
@@ -14,6 +14,7 @@ triggers:
   - hey threads
   - hey reply
   - hey compose
+  - hey draft
   - hey drafts
   # Calendar actions
   - hey calendars
@@ -41,6 +42,7 @@ triggers:
   - send email
   - reply to email
   - compose email
+  - save email draft
   - list mailboxes
   - check calendar
   - add todo
@@ -77,6 +79,7 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 1. **Always use `--json`** for structured, predictable output
 2. **Authentication required** for all data commands — run `hey auth login` first
 3. **HTML output** is available via `--html` for commands that return HTML content
+4. **Use `hey draft create` or `hey compose --draft` when the user must review before sending** — `hey compose` without `--draft` and `hey reply` send immediately
 
 ## Quick Reference
 
@@ -88,6 +91,7 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 | Reply to email | `hey reply <topic_id> -m "Thanks!"` |
 | Compose email | `hey compose --to user@example.com --subject "Hello"` |
 | Compose with CC/BCC | `hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello"` |
+| Create unsent draft | `hey compose --draft --to user@example.com --subject "Hello" -m "Draft body" --json` |
 | List drafts | `hey drafts --json` |
 | List calendars | `hey calendars --json` |
 | List calendar events | `hey recordings 123 --json` |
@@ -129,9 +133,10 @@ Want to read email?
 
 ```
 Want to send email?
-├── Reply to thread? → hey reply <topic_id> -m "message"
+├── Must a person review it first? → hey compose --draft --to <email> --subject "Subject" -m "message" --json
+├── Reply to thread now? → hey reply <topic_id> -m "message"
 │   └── Open editor? → hey reply <topic_id> (omit -m to open $EDITOR)
-├── Compose new? → hey compose --to <email> --subject "Subject"
+├── Send a new message now? → hey compose --to <email> --subject "Subject"
 │   ├── With body? → hey compose --to <email> --subject "Subject" -m "Body"
 │   ├── With CC? → add --cc <email>
 │   └── With BCC? → add --bcc <email>
@@ -179,6 +184,7 @@ hey reply <topic_id> -m "Thanks!"             # Reply with inline message
 hey reply <topic_id>                          # Reply via $EDITOR
 hey compose --to user@example.com --subject "Hello"         # Compose new (opens $EDITOR)
 hey compose --to user@example.com --subject "Hi" -m "Body"  # With inline body
+hey compose --draft --to user@example.com --subject "Hi" -m "Draft body"  # Save without sending
 hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Project update" -m "Body"  # With CC/BCC
 hey compose --subject "Update" --thread-id 12345 -m "msg"   # Post to existing thread
 ```
@@ -197,8 +203,12 @@ Takes posting IDs (the `id` field from `hey box` output).
 ### Drafts
 
 ```bash
+hey draft create --to alice@example.com --subject "Project update" -m "Draft body" --json  # Save without sending
+hey compose --draft --to alice@example.com --subject "Project update" -m "Draft body" --json  # Same draft behavior
 hey drafts --json                             # List drafts
 ```
+
+`hey draft create` and `hey compose --draft` create new outbound drafts only. They do not send. `--draft` cannot be combined with `--thread-id`. Reply drafts and draft editing are not supported.
 
 ### Calendars
 

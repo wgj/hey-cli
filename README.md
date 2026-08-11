@@ -73,8 +73,12 @@ hey threads 123                    # read a full email thread
 hey reply 123 -m "Thanks!"        # reply to a thread (or omit -m to open $EDITOR)
 hey compose --to user@example.com --subject "Hello"  # compose a new message
 hey compose --to user@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello"  # with CC/BCC
+hey compose --draft --to user@example.com --subject "Hello" -m "Draft body"  # save without sending
+hey draft create --to user@example.com --subject "Hello" -m "Draft body"  # save without sending
 hey drafts                         # list drafts
 ```
+
+`hey draft create` and `hey compose --draft` save a new outbound draft in HEY. Neither form sends the message. `hey compose` without `--draft` sends immediately. Drafts for an existing `--thread-id` are not supported.
 
 ### Calendars
 
