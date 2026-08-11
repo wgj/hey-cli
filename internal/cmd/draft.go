@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"html"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -91,8 +92,8 @@ func (c *draftCreateCommand) run(cmd *cobra.Command, args []string) error {
 }
 
 func saveDraft(cmd *cobra.Command, invocation string, input draftCreateInput) error {
-	if idsOnly || countFlag {
-		return output.ErrUsage("--ids-only and --count are not supported by " + invocation)
+	if err := validateDraftOutputMode(invocation); err != nil {
+		return err
 	}
 
 	if strings.TrimSpace(input.subject) == "" {
@@ -139,6 +140,52 @@ func saveDraft(cmd *cobra.Command, invocation string, input draftCreateInput) er
 			Description: "List saved drafts",
 		}),
 	)
+}
+
+func saveReplyDraft(cmd *cobra.Command, threadIDValue, messageValue string) error {
+	const invocation = "hey compose --draft --thread-id"
+	if err := validateDraftOutputMode(invocation); err != nil {
+		return err
+	}
+
+	threadID, err := strconv.ParseInt(threadIDValue, 10, 64)
+	if err != nil {
+		return output.ErrUsage(fmt.Sprintf("invalid thread ID: %s", threadIDValue))
+	}
+
+	message, err := (draftCreateInput{message: messageValue}).readMessage()
+	if err != nil {
+		return err
+	}
+
+	entryID, err := latestThreadEntryID(cmd.Context(), threadID)
+	if err != nil {
+		return err
+	}
+	if err = sdk.Entries().CreateReplyDraft(cmd.Context(), entryID, draftContentHTML(message)); err != nil {
+		return convertSDKError(err)
+	}
+
+	if writer.IsStyled() {
+		fmt.Fprintln(cmd.OutOrStdout(), "Reply draft created.")
+		return nil
+	}
+
+	return writeOK(nil,
+		output.WithSummary("Reply draft created"),
+		output.WithBreadcrumbs(output.Breadcrumb{
+			Action:      "list",
+			Command:     "hey drafts",
+			Description: "List saved drafts",
+		}),
+	)
+}
+
+func validateDraftOutputMode(invocation string) error {
+	if idsOnly || countFlag {
+		return output.ErrUsage("--ids-only and --count are not supported by " + invocation)
+	}
+	return nil
 }
 
 func (i draftCreateInput) readMessage() (string, error) {

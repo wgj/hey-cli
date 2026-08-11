@@ -15,13 +15,15 @@ The legacy `internal/client/` is used only for HTML-scraping gap operations mark
 | `/bubblebox.json` | GET | SDK `Boxes().GetBubblebox` | `hey box bubblebox` | covered |
 | `/calendars.json` | GET | SDK `Calendars().List` | `hey calendars` | covered |
 | `/calendars/{id}/recordings.json` | GET | SDK `Calendars().GetRecordings` | `hey recordings <calendar-id>`, `hey todo list`, `hey timetrack list`, `hey journal list` | covered |
-| `/topics/{id}/entries` | GET (HTML) | Legacy `GetTopicEntries` | `hey threads <id>` | gap: SDK Entry lacks body |
+| `/topics/{id}/entries` | GET (HTML) | SDK `GetHTML` | `hey threads <id>`, `hey reply <id>`, `hey compose --draft --thread-id <id>` | gap: SDK Entry lacks body |
 | `/entries/drafts.json` | GET | SDK `Entries().ListDrafts` | `hey drafts` | covered |
 | `/messages/new` | GET (HTML) | SDK `Messages().CreateDraft` | `hey draft create`, `hey compose --draft` | covered |
 | `/messages` | POST (form) | SDK `Messages().CreateDraft` | `hey draft create`, `hey compose --draft` | covered |
 | `/topics/messages` | POST | SDK `Messages().Create` | `hey compose` | covered |
 | `/topics/{id}/messages` | POST | SDK `Messages().CreateTopicMessage` | `hey compose --topic` | covered |
-| `/entries/{id}/replies` | POST | SDK `Entries().CreateReply` | `hey reply <topic-id>` | covered |
+| `/entries/{id}/replies.json` | POST | SDK `Entries().CreateReply` | `hey reply <topic-id>` | covered |
+| `/entries/{id}/replies/new` | GET (HTML) | SDK `Entries().CreateReplyDraft` | `hey compose --draft --thread-id <topic-id>` | covered |
+| `/entries/{id}/replies` | POST (form) | SDK `Entries().CreateReplyDraft` | `hey compose --draft --thread-id <topic-id>` | covered |
 | `/calendar/days/{date}/habits/{id}/completions.json` | POST | SDK `Habits().Complete` | `hey habit complete <id>` | covered |
 | `/calendar/days/{date}/habits/{id}/completions.json` | DELETE | SDK `Habits().Uncomplete` | `hey habit uncomplete <id>` | covered |
 | `/calendar/days/{date}/journal_entry.json` | GET | SDK `Journal().Get` | `hey journal read [date]` | partial: falls back to legacy |

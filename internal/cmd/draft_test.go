@@ -16,14 +16,21 @@ import (
 )
 
 type draftEndpointRecorder struct {
-	mu              sync.Mutex
-	form            url.Values
-	draftPosts      int
-	sendPosts       int
-	allowSend       bool
-	failDraftPost   bool
-	omitLocation    bool
-	unexpectedPaths []string
+	mu               sync.Mutex
+	form             url.Values
+	replyForm        url.Values
+	replyPath        string
+	draftPosts       int
+	replyDraftPosts  int
+	replySendPosts   int
+	replyFormGets    int
+	sendPosts        int
+	topicSendPosts   int
+	topicEntriesGets int
+	allowSend        bool
+	failDraftPost    bool
+	omitLocation     bool
+	unexpectedPaths  []string
 }
 
 func (r *draftEndpointRecorder) handler(w http.ResponseWriter, req *http.Request) {
@@ -34,6 +41,43 @@ func (r *draftEndpointRecorder) handler(w http.ResponseWriter, req *http.Request
 	case req.Method == http.MethodGet && req.URL.Path == "/messages/new":
 		w.Header().Set("Content-Type", "text/html")
 		_, _ = fmt.Fprint(w, `<html><head><meta name="csrf-token" content="draft-csrf-token"></head></html>`)
+	case req.Method == http.MethodGet && req.URL.Path == "/topics/12345/entries":
+		r.mu.Lock()
+		r.topicEntriesGets++
+		r.mu.Unlock()
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = fmt.Fprint(w, `<article id="entry_111" data-entry-id="111"></article><article id="entry_222" data-entry-id="222"></article>`)
+	case req.Method == http.MethodGet && req.URL.Path == "/entries/222/replies/new":
+		r.mu.Lock()
+		r.replyFormGets++
+		r.mu.Unlock()
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = fmt.Fprint(w, `<html>
+<head><meta name="csrf-token" content="reply-csrf-token"></head>
+<body>
+<form action="/entries/222/replies" method="post">
+  <input type="hidden" name="authenticity_token" value="reply-csrf-token">
+  <select name="acting_sender_id">
+    <option value="41">Other sender</option>
+    <option value="42" selected>Default sender</option>
+  </select>
+  <select name="entry[addressed][directly][]" multiple>
+    <option value="alice@example.com" selected>Alice Example</option>
+    <option value="bob@example.org" selected>Bob Example</option>
+  </select>
+  <select name="entry[addressed][copied][]" multiple>
+    <option value="carol@example.com" selected>Carol Example</option>
+  </select>
+  <select name="entry[addressed][blindcopied][]" multiple>
+    <option value="dave@example.org" selected>Dave Example</option>
+  </select>
+  <input type="hidden" name="message[auto_quoting]" value="true">
+  <input type="text" name="message[subject]" value="Re: Project update">
+  <input type="hidden" name="message[content]" value="Old content">
+  <button name="commit" value="Send">Send</button>
+</form>
+</body>
+</html>`)
 	case req.Method == http.MethodPost && req.URL.Path == "/messages":
 		_ = req.ParseForm()
 		r.mu.Lock()
@@ -60,11 +104,58 @@ func (r *draftEndpointRecorder) handler(w http.ResponseWriter, req *http.Request
 			return
 		}
 		http.Error(w, "send endpoint must not be called", http.StatusInternalServerError)
+	case req.Method == http.MethodPost && req.URL.Path == "/entries/222/replies":
+		_ = req.ParseForm()
+		r.mu.Lock()
+		r.replyDraftPosts++
+		r.replyForm = req.PostForm
+		r.replyPath = req.URL.Path
+		r.mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	case req.Method == http.MethodPost && req.URL.Path == "/entries/222/replies.json":
+		r.mu.Lock()
+		r.replySendPosts++
+		r.mu.Unlock()
+		http.Error(w, "reply send endpoint must not be called", http.StatusInternalServerError)
+	case req.Method == http.MethodPost && strings.HasPrefix(req.URL.Path, "/topics/") && strings.HasSuffix(req.URL.Path, "/entries.json"):
+		r.mu.Lock()
+		r.topicSendPosts++
+		r.mu.Unlock()
+		http.Error(w, "topic send endpoint must not be called", http.StatusInternalServerError)
 	default:
 		r.mu.Lock()
 		r.unexpectedPaths = append(r.unexpectedPaths, req.Method+" "+req.URL.Path)
 		r.mu.Unlock()
 		http.NotFound(w, req)
+	}
+}
+
+type replyDraftSnapshot struct {
+	form             url.Values
+	path             string
+	draftPosts       int
+	sendPosts        int
+	formGets         int
+	topicSendPosts   int
+	topicEntriesGets int
+}
+
+func (r *draftEndpointRecorder) replySnapshot() replyDraftSnapshot {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	form := make(url.Values, len(r.replyForm))
+	for key, values := range r.replyForm {
+		form[key] = append([]string(nil), values...)
+	}
+	return replyDraftSnapshot{
+		form:             form,
+		path:             r.replyPath,
+		draftPosts:       r.replyDraftPosts,
+		sendPosts:        r.replySendPosts,
+		formGets:         r.replyFormGets,
+		topicSendPosts:   r.topicSendPosts,
+		topicEntriesGets: r.topicEntriesGets,
 	}
 }
 
@@ -141,9 +232,9 @@ func runDraftCreate(t *testing.T, recorder *draftEndpointRecorder, token string,
 	return runDraftCommand(t, recorder, token, []string{"draft", "create"}, args...)
 }
 
-func runComposeDraft(t *testing.T, recorder *draftEndpointRecorder, token string, args ...string) (output.Response, error) {
+func runComposeDraft(t *testing.T, recorder *draftEndpointRecorder, args ...string) (output.Response, error) {
 	t.Helper()
-	return runDraftCommand(t, recorder, token, []string{"compose", "--draft"}, args...)
+	return runDraftCommand(t, recorder, "test-token", []string{"compose", "--draft"}, args...)
 }
 
 func assertDraftOnlyMutation(t *testing.T, recorder *draftEndpointRecorder) url.Values {
@@ -227,7 +318,7 @@ func TestDraftCreateSavesWithoutSending(t *testing.T) {
 
 func TestComposeDraftSavesWithoutSending(t *testing.T) {
 	recorder := &draftEndpointRecorder{}
-	resp, err := runComposeDraft(t, recorder, "test-token",
+	resp, err := runComposeDraft(t, recorder,
 		"--to", "alice@example.com",
 		"--subject", "Project update",
 		"-m", "Draft body",
@@ -254,22 +345,124 @@ func TestComposeDraftSavesWithoutSending(t *testing.T) {
 	}
 }
 
-func TestComposeDraftRejectsThreadIDBeforeMutation(t *testing.T) {
+func TestComposeDraftSavesReplyWithoutSending(t *testing.T) {
 	recorder := &draftEndpointRecorder{}
-	_, err := runComposeDraft(t, recorder, "test-token",
+	resp, err := runComposeDraft(t, recorder,
 		"--thread-id", "12345",
-		"--subject", "Project update",
-		"-m", "Draft body",
+		"-m", "Reply draft body",
 	)
-	if err == nil {
-		t.Fatal("expected --draft and --thread-id conflict")
+	if err != nil {
+		t.Fatalf("compose reply draft: %v", err)
 	}
-	if !strings.Contains(err.Error(), "--draft cannot be combined with --thread-id") {
-		t.Fatalf("error = %q, want flag conflict", err)
+	if resp.Summary != "Reply draft created" {
+		t.Fatalf("summary = %q, want %q", resp.Summary, "Reply draft created")
 	}
+	if strings.Contains(strings.ToLower(resp.Summary), "sent") {
+		t.Fatalf("summary must not claim the reply draft was sent: %q", resp.Summary)
+	}
+
 	_, draftPosts, sendPosts, unexpected := recorder.snapshot()
 	if draftPosts != 0 || sendPosts != 0 || len(unexpected) != 0 {
-		t.Fatalf("requests = draft:%d send:%d unexpected:%v, want zero", draftPosts, sendPosts, unexpected)
+		t.Fatalf("new-message requests = draft:%d send:%d unexpected:%v, want zero", draftPosts, sendPosts, unexpected)
+	}
+	reply := recorder.replySnapshot()
+	if reply.formGets != 1 {
+		t.Errorf("reply form GET calls = %d, want 1", reply.formGets)
+	}
+	if reply.draftPosts != 1 {
+		t.Errorf("reply draft POST calls = %d, want 1", reply.draftPosts)
+	}
+	if reply.path != "/entries/222/replies" {
+		t.Errorf("reply draft path = %q, want latest entry form path", reply.path)
+	}
+	if reply.topicEntriesGets != 1 {
+		t.Errorf("topic entries GET calls = %d, want 1", reply.topicEntriesGets)
+	}
+	if reply.sendPosts != 0 || reply.topicSendPosts != 0 {
+		t.Errorf("send POST calls = reply:%d topic:%d, want zero", reply.sendPosts, reply.topicSendPosts)
+	}
+	if got := reply.form.Get("acting_sender_id"); got != "42" {
+		t.Errorf("acting_sender_id = %q, want 42", got)
+	}
+	if got := reply.form.Get("entry[status]"); got != "drafted" {
+		t.Errorf("entry[status] = %q, want drafted", got)
+	}
+	if got := reply.form.Get("message[content]"); got != "<div>Reply draft body</div>" {
+		t.Errorf("message[content] = %q, want rich reply draft content", got)
+	}
+	if got := reply.form.Get("message[subject]"); got != "Re: Project update" {
+		t.Errorf("message[subject] = %q, want reply form subject", got)
+	}
+	if got := reply.form.Get("message[auto_quoting]"); got != "true" {
+		t.Errorf("message[auto_quoting] = %q, want reply form value", got)
+	}
+	if got := reply.form["entry[addressed][directly][]"]; strings.Join(got, ",") != "alice@example.com,bob@example.org" {
+		t.Errorf("direct recipients = %v", got)
+	}
+	if got := reply.form["entry[addressed][copied][]"]; strings.Join(got, ",") != "carol@example.com" {
+		t.Errorf("copied recipients = %v", got)
+	}
+	if got := reply.form["entry[addressed][blindcopied][]"]; strings.Join(got, ",") != "dave@example.org" {
+		t.Errorf("blind-copied recipients = %v", got)
+	}
+	if got := reply.form.Get("authenticity_token"); got != "reply-csrf-token" {
+		t.Errorf("authenticity_token = %q, want reply-csrf-token", got)
+	}
+	if got := reply.form.Get("commit"); got != "" {
+		t.Errorf("commit = %q, want no send commit", got)
+	}
+}
+
+func TestComposeReplyDraftRejectsInvalidThreadIDBeforeRequest(t *testing.T) {
+	recorder := &draftEndpointRecorder{}
+	_, err := runComposeDraft(t, recorder, "--thread-id", "not-a-number", "-m", "Draft body")
+	if err == nil {
+		t.Fatal("expected invalid thread ID error")
+	}
+	if !strings.Contains(err.Error(), "invalid thread ID") {
+		t.Fatalf("error = %q, want invalid thread ID", err)
+	}
+	_, draftPosts, sendPosts, unexpected := recorder.snapshot()
+	reply := recorder.replySnapshot()
+	if draftPosts != 0 || sendPosts != 0 || reply.draftPosts != 0 || reply.sendPosts != 0 || reply.formGets != 0 || reply.topicSendPosts != 0 || reply.topicEntriesGets != 0 || len(unexpected) != 0 {
+		t.Fatalf("requests occurred before validation: draft:%d send:%d reply-draft:%d reply-send:%d reply-form:%d topic-send:%d entries:%d unexpected:%v", draftPosts, sendPosts, reply.draftPosts, reply.sendPosts, reply.formGets, reply.topicSendPosts, reply.topicEntriesGets, unexpected)
+	}
+}
+
+func TestComposeReplyDraftRejectsNewMessageFieldsBeforeRequest(t *testing.T) {
+	for _, flag := range []string{"--to", "--cc", "--bcc", "--subject"} {
+		t.Run(flag, func(t *testing.T) {
+			recorder := &draftEndpointRecorder{}
+			_, err := runComposeDraft(t, recorder, "--thread-id", "12345", flag, "alice@example.com", "-m", "Draft body")
+			if err == nil {
+				t.Fatalf("expected %s conflict", flag)
+			}
+			if !strings.Contains(err.Error(), "cannot be combined") {
+				t.Fatalf("error = %q, want flag conflict", err)
+			}
+			_, draftPosts, sendPosts, unexpected := recorder.snapshot()
+			reply := recorder.replySnapshot()
+			if draftPosts != 0 || sendPosts != 0 || reply.draftPosts != 0 || reply.sendPosts != 0 || reply.formGets != 0 || reply.topicSendPosts != 0 || reply.topicEntriesGets != 0 || len(unexpected) != 0 {
+				t.Fatalf("requests occurred before validation: draft:%d send:%d reply-draft:%d reply-send:%d reply-form:%d topic-send:%d entries:%d unexpected:%v", draftPosts, sendPosts, reply.draftPosts, reply.sendPosts, reply.formGets, reply.topicSendPosts, reply.topicEntriesGets, unexpected)
+			}
+		})
+	}
+}
+
+func TestComposeReplyDraftRejectsListOutputModesBeforeRequest(t *testing.T) {
+	for _, flag := range []string{"--ids-only", "--count"} {
+		t.Run(flag, func(t *testing.T) {
+			recorder := &draftEndpointRecorder{}
+			_, err := runComposeDraft(t, recorder, "--thread-id", "12345", flag, "-m", "Draft body")
+			if err == nil {
+				t.Fatalf("expected %s error", flag)
+			}
+			_, draftPosts, sendPosts, unexpected := recorder.snapshot()
+			reply := recorder.replySnapshot()
+			if draftPosts != 0 || sendPosts != 0 || reply.draftPosts != 0 || reply.sendPosts != 0 || reply.formGets != 0 || reply.topicSendPosts != 0 || reply.topicEntriesGets != 0 || len(unexpected) != 0 {
+				t.Fatalf("requests occurred before validation: draft:%d send:%d reply-draft:%d reply-send:%d reply-form:%d topic-send:%d entries:%d unexpected:%v", draftPosts, sendPosts, reply.draftPosts, reply.sendPosts, reply.formGets, reply.topicSendPosts, reply.topicEntriesGets, unexpected)
+			}
+		})
 	}
 }
 

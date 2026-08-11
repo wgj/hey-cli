@@ -17,6 +17,12 @@ var (
 	csrfMetaReversePattern = regexp.MustCompile(`<meta[^>]+content=["']([^"']+)["'][^>]+name=["']csrf-token["']`)
 )
 
+type smokeDraft struct {
+	ID      int64  `json:"id"`
+	Summary string `json:"summary"`
+	EditURL string `json:"edit_url"`
+}
+
 func TestCompose(t *testing.T) {
 	uid := uniqueID()
 	subject := fmt.Sprintf("Smoke test %s", uid)
@@ -188,6 +194,114 @@ func TestDraftCreateSavedAndNotSent(t *testing.T) {
 	}
 }
 
+func TestComposeReplyDraftSavedAndNotSent(t *testing.T) {
+	topicID := existingReplyTopicID(t)
+	beforeIDs := make(map[int64]struct{})
+	for _, draft := range listSmokeDrafts(t) {
+		beforeIDs[draft.ID] = struct{}{}
+	}
+
+	token := "reply-draft-smoke-" + uniqueID()
+	body := "Reply draft body " + token
+	stdout, stderr, code := hey(t,
+		"compose",
+		"--draft",
+		"--thread-id", topicID,
+		"-m", body,
+		"--json",
+	)
+	if code != 0 {
+		t.Fatalf("compose reply draft failed (exit %d): %s", code, stderr)
+	}
+	t.Cleanup(func() {
+		_, editURL, _ := findNewReplyDraft(t, beforeIDs, token)
+		deleteDraftFixtureAtEditURL(t, editURL)
+	})
+
+	var createResp Response
+	if err := json.Unmarshal([]byte(stdout), &createResp); err != nil {
+		t.Fatalf("failed to parse compose reply draft response: %v", err)
+	}
+	if !createResp.OK {
+		t.Fatal("compose reply draft returned ok=false")
+	}
+	if createResp.Summary != "Reply draft created" {
+		t.Errorf("summary = %q, want %q", createResp.Summary, "Reply draft created")
+	}
+	assertNotContains(t, strings.ToLower(createResp.Summary), "sent")
+
+	saved, _, editHTML := findNewReplyDraft(t, beforeIDs, token)
+	t.Logf("created reply draft %d", saved.ID)
+	assertContains(t, editHTML, token)
+
+	threadURL := fmt.Sprintf("%s/topics/%s", strings.TrimRight(baseURL, "/"), topicID)
+	assertNotContains(t, fetchHTML(t, threadURL), token)
+	assertNotContains(t, fetchHTML(t, strings.TrimRight(baseURL, "/")+"/topics/sent.json"), token)
+	assertNotContains(t, browserPageText(t, strings.TrimRight(baseURL, "/")+"/topics/sent"), token)
+}
+
+func existingReplyTopicID(t *testing.T) string {
+	t.Helper()
+
+	type posting struct {
+		AppURL string `json:"app_url"`
+	}
+	type boxResponse struct {
+		Postings []posting `json:"postings"`
+	}
+
+	data := dataAs[boxResponse](t, heyJSON(t, "box", "imbox", "--limit", "20"))
+	for _, candidate := range data.Postings {
+		topicID := extractTopicID(candidate.AppURL)
+		if topicID == "" {
+			continue
+		}
+		_, _, code := hey(t, "threads", topicID, "--json")
+		if code == 0 {
+			return topicID
+		}
+	}
+
+	t.Fatal("could not find an existing topic that can be read")
+	return ""
+}
+
+func listSmokeDrafts(t *testing.T) []smokeDraft {
+	t.Helper()
+
+	resp := heyJSON(t, "drafts", "--all")
+	return dataAs[[]smokeDraft](t, resp)
+}
+
+func findNewReplyDraft(t *testing.T, beforeIDs map[int64]struct{}, token string) (smokeDraft, string, string) {
+	t.Helper()
+
+	var newDrafts []smokeDraft
+	for _, draft := range listSmokeDrafts(t) {
+		if _, existed := beforeIDs[draft.ID]; !existed {
+			newDrafts = append(newDrafts, draft)
+		}
+	}
+	for _, requireSummaryMatch := range []bool{true, false} {
+		for _, draft := range newDrafts {
+			if requireSummaryMatch != strings.Contains(draft.Summary, token) || draft.EditURL == "" {
+				continue
+			}
+			editURL := draft.EditURL
+			if strings.HasPrefix(editURL, "/") {
+				editURL = strings.TrimRight(baseURL, "/") + editURL
+			}
+			editHTML := fetchHTML(t, editURL)
+			if strings.Contains(editHTML, token) {
+				return draft, editURL, editHTML
+			}
+		}
+	}
+
+	t.Fatalf("could not find a new reply draft containing %q", token)
+	return smokeDraft{}, "", ""
+}
+
 func assertDraftSavedAndNotSent(t *testing.T, command []string) {
 	t.Helper()
 
@@ -271,10 +385,21 @@ func deleteDraftFixture(t *testing.T, draftID int64) {
 	t.Helper()
 
 	editURL := fmt.Sprintf("%s/messages/%d/edit", strings.TrimRight(baseURL, "/"), draftID)
+	deleteDraftFixtureAtEditURL(t, editURL)
+}
+
+func deleteDraftFixtureAtEditURL(t *testing.T, editURL string) {
+	t.Helper()
+
 	editHTML := fetchHTML(t, editURL)
 	token := extractCSRFToken(editHTML)
 	if token == "" {
-		t.Errorf("could not find a CSRF token while deleting draft %d", draftID)
+		t.Errorf("could not find a CSRF token while deleting draft at %s", editURL)
+		return
+	}
+	deleteURL := draftDeleteURL(editURL)
+	if deleteURL == "" {
+		t.Errorf("could not derive draft deletion URL from %s", editURL)
 		return
 	}
 
@@ -283,7 +408,6 @@ func deleteDraftFixture(t *testing.T, draftID int64) {
 	values.Set("status", "drafted")
 	values.Set("authenticity_token", token)
 
-	deleteURL := fmt.Sprintf("%s/messages/%d", strings.TrimRight(baseURL, "/"), draftID)
 	req, err := http.NewRequest(http.MethodPost, deleteURL, strings.NewReader(values.Encode()))
 	if err != nil {
 		t.Errorf("could not create draft cleanup request: %v", err)
@@ -303,13 +427,28 @@ func deleteDraftFixture(t *testing.T, draftID int64) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		t.Errorf("draft %d cleanup failed: %v", draftID, err)
+		t.Errorf("draft cleanup failed for %s: %v", deleteURL, err)
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= http.StatusBadRequest {
-		t.Errorf("draft %d cleanup returned HTTP %d", draftID, resp.StatusCode)
+		t.Errorf("draft cleanup for %s returned HTTP %d", deleteURL, resp.StatusCode)
 	}
+}
+
+func draftDeleteURL(editURL string) string {
+	parsed, err := url.Parse(editURL)
+	if err != nil {
+		return ""
+	}
+	path := strings.TrimSuffix(parsed.Path, "/")
+	if (!strings.HasPrefix(path, "/messages/") && !strings.HasPrefix(path, "/entries/drafts/")) || !strings.HasSuffix(path, "/edit") {
+		return ""
+	}
+	parsed.Path = strings.TrimSuffix(path, "/edit")
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String()
 }
 
 func extractCSRFToken(page string) string {
