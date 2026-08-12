@@ -15,7 +15,7 @@ require (
 	golang.org/x/term v0.45.0
 )
 
-replace github.com/basecamp/hey-sdk/go => /tmp/hey-dogfood.fRAVeB/hey-sdk/go
+replace github.com/basecamp/hey-sdk/go => github.com/wgj/hey-sdk/go v0.3.1-0.20260812033848-cf821aec0b53
 
 require (
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
