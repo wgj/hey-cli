@@ -21,7 +21,7 @@ var curatedCategories = []struct {
 	},
 	{
 		heading: "CALENDAR & TASKS",
-		names:   []string{"calendars", "recordings", "todo", "habit", "timetrack", "journal"},
+		names:   []string{"calendars", "day-view", "recordings", "todo", "habit", "timetrack", "journal"},
 	},
 	{
 		heading: "AUTH & CONFIG",

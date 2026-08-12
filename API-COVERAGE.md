@@ -13,8 +13,10 @@ The legacy `internal/client/` is used only for HTML-scraping gap operations mark
 | `/asidebox.json` | GET | SDK `Boxes().GetAsidebox` | `hey box asidebox` | covered |
 | `/laterbox.json` | GET | SDK `Boxes().GetLaterbox` | `hey box laterbox` | covered |
 | `/bubblebox.json` | GET | SDK `Boxes().GetBubblebox` | `hey box bubblebox` | covered |
-| `/calendars.json` | GET | SDK `Calendars().List` | `hey calendars` | covered |
-| `/calendars/{id}/recordings.json` | GET | SDK `Calendars().GetRecordings` | `hey recordings <calendar-id>`, `hey todo list`, `hey timetrack list`, `hey journal list` | covered |
+| `/identity.json` | GET | SDK `Identity().GetIdentity` | `hey day-view` | covered |
+| `/calendars.json` | GET | SDK `Calendars().List` | `hey calendars`, `hey day-view` | covered |
+| `/calendars/{id}/recordings.json` | GET | SDK `Calendars().GetRecordings` | `hey recordings <calendar-id>`, `hey day-view`, `hey todo list`, `hey timetrack list`, `hey journal list` | covered |
+| `/calendars/{id}/occurrences` | GET | SDK `Calendars().GetOccurrences` | `hey day-view` | covered |
 | `/topics/{id}/entries` | GET (HTML) | Legacy `GetTopicEntries` | `hey threads <id>` | gap: SDK Entry lacks body |
 | `/entries/drafts.json` | GET | SDK `Entries().ListDrafts` | `hey drafts` | covered |
 | `/topics/messages` | POST | SDK `Messages().Create` | `hey compose` | covered |

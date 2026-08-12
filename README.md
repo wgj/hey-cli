@@ -81,7 +81,13 @@ hey drafts                         # list drafts
 ```bash
 hey calendars                      # list calendars
 hey recordings 1 --starts-on 2026-01-01 --ends-on 2026-01-31  # list events in a calendar
+hey day-view                       # show today's schedule from all calendars
+hey day-view 2026-01-15 --calendar 123 --calendar 456  # use only these calendars
 ```
+
+Use `day-view` for questions such as "What is on my schedule today?" It uses your HEY account time zone and all calendars by default. It merges recordings with realized and unrealized occurrences, then filters the result to the requested day. It removes duplicates by event ID or occurrence ID. It does not remove different events only because their titles and times match. It returns only timed, all-day, overnight, and multi-day `Calendar::Event` records. It excludes HEY's Nighttime display block and all non-event records.
+
+The command fails if it cannot read both sources for every selected calendar. It does not return a partial schedule. JSON output keeps `starts_at` and `ends_at` in UTC and includes `date` and `time_zone` in the response metadata. The existing `recordings` command is unchanged and still returns the source recordings for one calendar.
 
 ### Todos
 
