@@ -15,6 +15,8 @@ require (
 	golang.org/x/term v0.45.0
 )
 
+replace github.com/basecamp/hey-sdk/go => /tmp/hey-dogfood.fRAVeB/hey-sdk/go
+
 require (
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
@@ -37,5 +39,3 @@ require (
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 )
-
-replace github.com/basecamp/hey-sdk/go => github.com/wgj/hey-sdk/go v0.3.1-0.20260810201611-4303a71309d8

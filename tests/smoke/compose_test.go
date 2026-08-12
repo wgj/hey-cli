@@ -3,8 +3,25 @@ package smoke_test
 import (
 	"encoding/json"
 	"fmt"
+	"html"
+	"net/http"
+	"net/url"
+	"regexp"
+	"strings"
 	"testing"
+	"time"
 )
+
+var (
+	csrfMetaPattern        = regexp.MustCompile(`<meta[^>]+name=["']csrf-token["'][^>]+content=["']([^"']+)["']`)
+	csrfMetaReversePattern = regexp.MustCompile(`<meta[^>]+content=["']([^"']+)["'][^>]+name=["']csrf-token["']`)
+)
+
+type smokeDraft struct {
+	ID      int64  `json:"id"`
+	Summary string `json:"summary"`
+	EditURL string `json:"edit_url"`
+}
 
 func TestCompose(t *testing.T) {
 	uid := uniqueID()
@@ -160,6 +177,287 @@ func TestDrafts(t *testing.T) {
 		ID int `json:"id"`
 	}
 	_ = dataAs[[]Draft](t, resp)
+}
+
+func TestDraftCreateSavedAndNotSent(t *testing.T) {
+	commands := []struct {
+		name string
+		args []string
+	}{
+		{name: "draft create", args: []string{"draft", "create"}},
+		{name: "compose draft", args: []string{"compose", "--draft"}},
+	}
+	for _, command := range commands {
+		t.Run(command.name, func(t *testing.T) {
+			assertDraftSavedAndNotSent(t, command.args)
+		})
+	}
+}
+
+func TestComposeReplyDraftSavedAndNotSent(t *testing.T) {
+	topicID := existingReplyTopicID(t)
+	beforeIDs := make(map[int64]struct{})
+	for _, draft := range listSmokeDrafts(t) {
+		beforeIDs[draft.ID] = struct{}{}
+	}
+
+	token := "reply-draft-smoke-" + uniqueID()
+	body := "Reply draft body " + token
+	stdout, stderr, code := hey(t,
+		"compose",
+		"--draft",
+		"--thread-id", topicID,
+		"-m", body,
+		"--json",
+	)
+	if code != 0 {
+		t.Fatalf("compose reply draft failed (exit %d): %s", code, stderr)
+	}
+	t.Cleanup(func() {
+		_, editURL, _ := findNewReplyDraft(t, beforeIDs, token)
+		deleteDraftFixtureAtEditURL(t, editURL)
+	})
+
+	var createResp Response
+	if err := json.Unmarshal([]byte(stdout), &createResp); err != nil {
+		t.Fatalf("failed to parse compose reply draft response: %v", err)
+	}
+	if !createResp.OK {
+		t.Fatal("compose reply draft returned ok=false")
+	}
+	if createResp.Summary != "Reply draft created" {
+		t.Errorf("summary = %q, want %q", createResp.Summary, "Reply draft created")
+	}
+	assertNotContains(t, strings.ToLower(createResp.Summary), "sent")
+
+	saved, _, editHTML := findNewReplyDraft(t, beforeIDs, token)
+	t.Logf("created reply draft %d", saved.ID)
+	assertContains(t, editHTML, token)
+
+	threadURL := fmt.Sprintf("%s/topics/%s", strings.TrimRight(baseURL, "/"), topicID)
+	assertNotContains(t, fetchHTML(t, threadURL), token)
+	assertNotContains(t, fetchHTML(t, strings.TrimRight(baseURL, "/")+"/topics/sent.json"), token)
+	assertNotContains(t, browserPageText(t, strings.TrimRight(baseURL, "/")+"/topics/sent"), token)
+}
+
+func existingReplyTopicID(t *testing.T) string {
+	t.Helper()
+
+	type posting struct {
+		AppURL string `json:"app_url"`
+	}
+	type boxResponse struct {
+		Postings []posting `json:"postings"`
+	}
+
+	data := dataAs[boxResponse](t, heyJSON(t, "box", "imbox", "--limit", "20"))
+	for _, candidate := range data.Postings {
+		topicID := extractTopicID(candidate.AppURL)
+		if topicID == "" {
+			continue
+		}
+		_, _, code := hey(t, "threads", topicID, "--json")
+		if code == 0 {
+			return topicID
+		}
+	}
+
+	t.Fatal("could not find an existing topic that can be read")
+	return ""
+}
+
+func listSmokeDrafts(t *testing.T) []smokeDraft {
+	t.Helper()
+
+	resp := heyJSON(t, "drafts", "--all")
+	return dataAs[[]smokeDraft](t, resp)
+}
+
+func findNewReplyDraft(t *testing.T, beforeIDs map[int64]struct{}, token string) (smokeDraft, string, string) {
+	t.Helper()
+
+	var newDrafts []smokeDraft
+	for _, draft := range listSmokeDrafts(t) {
+		if _, existed := beforeIDs[draft.ID]; !existed {
+			newDrafts = append(newDrafts, draft)
+		}
+	}
+	for _, requireSummaryMatch := range []bool{true, false} {
+		for _, draft := range newDrafts {
+			if requireSummaryMatch != strings.Contains(draft.Summary, token) || draft.EditURL == "" {
+				continue
+			}
+			editURL := draft.EditURL
+			if strings.HasPrefix(editURL, "/") {
+				editURL = strings.TrimRight(baseURL, "/") + editURL
+			}
+			editHTML := fetchHTML(t, editURL)
+			if strings.Contains(editHTML, token) {
+				return draft, editURL, editHTML
+			}
+		}
+	}
+
+	t.Fatalf("could not find a new reply draft containing %q", token)
+	return smokeDraft{}, "", ""
+}
+
+func assertDraftSavedAndNotSent(t *testing.T, command []string) {
+	t.Helper()
+
+	uid := uniqueID()
+	subject := fmt.Sprintf("Draft smoke %s", uid)
+	body := fmt.Sprintf("Draft body %s", uid)
+
+	args := append([]string(nil), command...)
+	args = append(args,
+		"--to", smokeEmail,
+		"--subject", subject,
+		"-m", body,
+		"--json",
+	)
+	stdout, stderr, code := hey(t, args...)
+	if code != 0 {
+		t.Fatalf("%s failed (exit %d): %s", strings.Join(command, " "), code, stderr)
+	}
+
+	var createResp Response
+	if err := json.Unmarshal([]byte(stdout), &createResp); err != nil {
+		t.Fatalf("failed to parse %s response: %v", strings.Join(command, " "), err)
+	}
+	if !createResp.OK {
+		t.Fatalf("%s returned ok=false", strings.Join(command, " "))
+	}
+	assertContains(t, createResp.Summary, "Draft created")
+	assertNotContains(t, strings.ToLower(createResp.Summary), "sent")
+
+	type Draft struct {
+		ID      int64  `json:"id"`
+		Subject string `json:"subject"`
+		EditURL string `json:"edit_url"`
+	}
+	created := dataAs[Draft](t, createResp)
+	if created.ID <= 0 {
+		t.Fatalf("draft ID = %d, want a positive ID", created.ID)
+	}
+	t.Cleanup(func() { deleteDraftFixture(t, created.ID) })
+
+	draftsResp := heyJSON(t, "drafts", "--all")
+	drafts := dataAs[[]Draft](t, draftsResp)
+	var saved *Draft
+	for i := range drafts {
+		if drafts[i].ID == created.ID {
+			saved = &drafts[i]
+			break
+		}
+	}
+	if saved == nil {
+		t.Fatalf("created draft %d was not returned by hey drafts", created.ID)
+	}
+	if saved.Subject != subject {
+		t.Errorf("saved subject = %q, want %q", saved.Subject, subject)
+	}
+
+	editURL := created.EditURL
+	if editURL == "" {
+		editURL = saved.EditURL
+	}
+	if strings.HasPrefix(editURL, "/") {
+		editURL = strings.TrimRight(baseURL, "/") + editURL
+	}
+	if editURL == "" {
+		t.Fatal("created draft did not include an edit URL")
+	}
+	editHTML := fetchHTML(t, editURL)
+	assertContains(t, editHTML, subject)
+	assertContains(t, editHTML, uid)
+
+	draftsPage := browserPageText(t, baseURL+"/entries/drafts")
+	assertContains(t, draftsPage, subject)
+
+	sentJSON := fetchHTML(t, baseURL+"/topics/sent.json")
+	assertNotContains(t, sentJSON, subject)
+	sentPage := browserPageText(t, baseURL+"/topics/sent")
+	assertNotContains(t, sentPage, subject)
+}
+
+func deleteDraftFixture(t *testing.T, draftID int64) {
+	t.Helper()
+
+	editURL := fmt.Sprintf("%s/messages/%d/edit", strings.TrimRight(baseURL, "/"), draftID)
+	deleteDraftFixtureAtEditURL(t, editURL)
+}
+
+func deleteDraftFixtureAtEditURL(t *testing.T, editURL string) {
+	t.Helper()
+
+	editHTML := fetchHTML(t, editURL)
+	token := extractCSRFToken(editHTML)
+	if token == "" {
+		t.Errorf("could not find a CSRF token while deleting draft at %s", editURL)
+		return
+	}
+	deleteURL := draftDeleteURL(editURL)
+	if deleteURL == "" {
+		t.Errorf("could not derive draft deletion URL from %s", editURL)
+		return
+	}
+
+	values := url.Values{}
+	values.Set("_method", "delete")
+	values.Set("status", "drafted")
+	values.Set("authenticity_token", token)
+
+	req, err := http.NewRequest(http.MethodPost, deleteURL, strings.NewReader(values.Encode()))
+	if err != nil {
+		t.Errorf("could not create draft cleanup request: %v", err)
+		return
+	}
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Referer", editURL)
+	req.Header.Set("X-CSRF-Token", token)
+	req.AddCookie(&http.Cookie{Name: "session_token", Value: sessionCookie})
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Errorf("draft cleanup failed for %s: %v", deleteURL, err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusBadRequest {
+		t.Errorf("draft cleanup for %s returned HTTP %d", deleteURL, resp.StatusCode)
+	}
+}
+
+func draftDeleteURL(editURL string) string {
+	parsed, err := url.Parse(editURL)
+	if err != nil {
+		return ""
+	}
+	path := strings.TrimSuffix(parsed.Path, "/")
+	if (!strings.HasPrefix(path, "/messages/") && !strings.HasPrefix(path, "/entries/drafts/")) || !strings.HasSuffix(path, "/edit") {
+		return ""
+	}
+	parsed.Path = strings.TrimSuffix(path, "/edit")
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String()
+}
+
+func extractCSRFToken(page string) string {
+	for _, pattern := range []*regexp.Regexp{csrfMetaPattern, csrfMetaReversePattern} {
+		if match := pattern.FindStringSubmatch(page); len(match) == 2 {
+			return html.UnescapeString(match[1])
+		}
+	}
+	return ""
 }
 
 func TestDraftsLimit(t *testing.T) {

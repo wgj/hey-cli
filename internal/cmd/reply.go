@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 
@@ -57,17 +58,10 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 		return output.ErrUsage("could not determine thread recipients")
 	}
 
-	// Fetch entries to find the latest entry ID for the reply.
-	entriesResp, err := sdk.GetHTML(ctx, fmt.Sprintf("/topics/%d/entries", threadID))
+	latestEntryID, err := latestThreadEntryID(ctx, threadID)
 	if err != nil {
-		return convertSDKError(err)
+		return err
 	}
-	entries := htmlutil.ParseTopicEntriesHTML(string(entriesResp.Data))
-	if len(entries) == 0 {
-		return output.ErrNotFound("entries for thread", args[0])
-	}
-
-	latestEntryID := entries[len(entries)-1].ID
 
 	message := c.message
 	if message == "" {
@@ -107,4 +101,16 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 			Description: "View the full thread",
 		}),
 	)
+}
+
+func latestThreadEntryID(ctx context.Context, threadID int64) (int64, error) {
+	entriesResp, err := sdk.GetHTML(ctx, fmt.Sprintf("/topics/%d/entries", threadID))
+	if err != nil {
+		return 0, convertSDKError(err)
+	}
+	entries := htmlutil.ParseTopicEntriesHTML(string(entriesResp.Data))
+	if len(entries) == 0 {
+		return 0, output.ErrNotFound("entries for thread", strconv.FormatInt(threadID, 10))
+	}
+	return entries[len(entries)-1].ID, nil
 }

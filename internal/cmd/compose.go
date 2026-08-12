@@ -19,6 +19,7 @@ type composeCommand struct {
 	subject  string
 	message  string
 	threadID string
+	draft    bool
 }
 
 func newComposeCommand() *composeCommand {
@@ -27,9 +28,11 @@ func newComposeCommand() *composeCommand {
 		Use:   "compose",
 		Short: "Compose a new message",
 		Annotations: map[string]string{
-			"agent_notes": "Creates a new email. Requires --subject. Use --to (optionally with --cc/--bcc) for new threads or --thread-id for existing ones.",
+			"agent_notes": "Creates a new email. Requires --subject for a new thread. Add --draft to save without sending. Use --to (optionally with --cc/--bcc) for new threads or --thread-id for existing ones.",
 		},
 		Example: `  hey compose --to alice@example.com --subject "Hello" -m "Hi there"
+  hey compose --draft --to alice@example.com --subject "Project update" -m "Draft body"
+  hey compose --draft --thread-id 12345 -m "Draft reply"
   hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello" -m "Hi"
   hey compose --subject "Update" --thread-id 12345 -m "Thread reply"
   echo "Long message" | hey compose --to bob@example.com --subject "Report"`,
@@ -39,9 +42,10 @@ func newComposeCommand() *composeCommand {
 	composeCommand.cmd.Flags().StringVar(&composeCommand.to, "to", "", "Recipient email address(es)")
 	composeCommand.cmd.Flags().StringVar(&composeCommand.cc, "cc", "", "CC recipient email address(es)")
 	composeCommand.cmd.Flags().StringVar(&composeCommand.bcc, "bcc", "", "BCC recipient email address(es)")
-	composeCommand.cmd.Flags().StringVar(&composeCommand.subject, "subject", "", "Message subject (required)")
+	composeCommand.cmd.Flags().StringVar(&composeCommand.subject, "subject", "", "Message subject (required for a new thread)")
 	composeCommand.cmd.Flags().StringVarP(&composeCommand.message, "message", "m", "", "Message body (or opens $EDITOR)")
-	composeCommand.cmd.Flags().StringVar(&composeCommand.threadID, "thread-id", "", "Thread ID to post message to")
+	composeCommand.cmd.Flags().StringVar(&composeCommand.threadID, "thread-id", "", "Thread ID to reply to")
+	composeCommand.cmd.Flags().BoolVar(&composeCommand.draft, "draft", false, "Save as a draft instead of sending")
 
 	return composeCommand
 }
@@ -49,6 +53,24 @@ func newComposeCommand() *composeCommand {
 func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 	if err := requireAuth(); err != nil {
 		return err
+	}
+
+	if c.draft {
+		if c.threadID != "" {
+			for _, flag := range []string{"to", "cc", "bcc", "subject"} {
+				if cmd.Flags().Changed(flag) {
+					return output.ErrUsage("--to, --cc, --bcc, and --subject cannot be combined with --draft and --thread-id")
+				}
+			}
+			return saveReplyDraft(cmd, c.threadID, c.message)
+		}
+		return saveDraft(cmd, "hey compose --draft", draftCreateInput{
+			to:      c.to,
+			cc:      c.cc,
+			bcc:     c.bcc,
+			subject: c.subject,
+			message: c.message,
+		})
 	}
 
 	if c.subject == "" {
